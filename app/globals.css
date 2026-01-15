@@ -1,0 +1,133 @@
+:root {
+  --purple: #6a11cb;
+  --blue: #2575fc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: linear-gradient(135deg, var(--purple), var(--blue));
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 760px;
+  margin: auto;
+  padding: 16px;
+}
+
+h1 {
+  color: white;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: white;
+  padding: 16px;
+  border-radius: 14px;
+  margin-bottom: 18px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+}
+
+.score-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+}
+
+input {
+  width: 64px;
+  padding: 8px;
+  font-size: 15px;
+  text-align: center;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
+
+button {
+  width: 100%;
+  padding: 12px;
+  margin-top: 10px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  color: white;
+  background: linear-gradient(135deg, var(--purple), var(--blue));
+}
+
+button.danger {
+  background: linear-gradient(135deg, #ff416c, #ff4b2b);
+}
+
+button.animate:active {
+  transform: scale(0.96);
+}
+
+/* Badges */
+.badge {
+  padding: 5px 10px;
+  border-radius: 16px;
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.badge.mwas {
+  background: linear-gradient(135deg, #1e90ff, #007bff);
+}
+
+.badge.mash {
+  background: linear-gradient(135deg, #2ecc71, #27ae60);
+}
+
+/* Table */
+.table-wrapper {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 520px;
+}
+
+th {
+  background: linear-gradient(135deg, var(--purple), var(--blue));
+  color: white;
+  padding: 8px;
+}
+
+td {
+  padding: 8px;
+  text-align: center;
+  border-bottom: 1px solid #eee;
+}
+
+/* Match History */
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+li {
+  background: #f5f7fa;
+  padding: 10px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.timestamp {
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+}
