@@ -10,8 +10,7 @@ import {
   doc,
   getDoc,
   orderBy,
-  query,
-  limit
+  query
 } from "firebase/firestore";
 
 const teams = ["Mwas", "Mash"];
@@ -51,12 +50,17 @@ function calculateTable(matches) {
 }
 
 export default function Home() {
-  const [matches, setMatches] = useState([]);
+  const [allMatches, setAllMatches] = useState([]);
+  const [recentMatches, setRecentMatches] = useState([]);
   const [table, setTable] = useState(calculateTable([]));
+  const [adminPin, setAdminPin] = useState("");
+
   const [mwasGoals, setMwasGoals] = useState(0);
   const [mashGoals, setMashGoals] = useState(0);
-  const [pin, setPin] = useState("");
-  const [adminPin, setAdminPin] = useState("");
+
+  const [pinInput, setPinInput] = useState("");
+  const [modalAction, setModalAction] = useState(null);
+  const [targetMatchId, setTargetMatchId] = useState(null);
 
   /* ---------- LOAD DATA ---------- */
   useEffect(() => {
@@ -66,72 +70,69 @@ export default function Home() {
 
   async function loadAdminPin() {
     const snap = await getDoc(doc(db, "config", "admin"));
-    if (snap.exists()) {
-      setAdminPin(snap.data().pin);
-    }
+    if (snap.exists()) setAdminPin(snap.data().pin);
   }
 
   async function loadMatches() {
-    const q = query(
+    const qAll = query(
       collection(db, "league", "matches", "list"),
-      orderBy("timestamp", "desc"),
-      limit(10)
+      orderBy("timestamp", "asc")
     );
-    const snap = await getDocs(q);
-    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    setMatches(data);
-    setTable(calculateTable(data));
+    const allSnap = await getDocs(qAll);
+    const all = allSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    setAllMatches(all);
+    setTable(calculateTable(all));
+
+    setRecentMatches(all.slice(-10).reverse());
   }
 
-  /* ---------- PIN CHECK ---------- */
+  /* ---------- MODAL CONTROL ---------- */
+  function openModal(action, matchId = null) {
+    setModalAction(action);
+    setTargetMatchId(matchId);
+    setPinInput("");
+  }
+
+  function closeModal() {
+    setModalAction(null);
+    setTargetMatchId(null);
+    setPinInput("");
+  }
+
   function verifyPin() {
-    if (pin !== adminPin) {
+    if (pinInput !== adminPin) {
       alert("Incorrect PIN");
       return false;
     }
     return true;
   }
 
-  /* ---------- ADD MATCH ---------- */
-  async function submitMatch() {
+  /* ---------- ACTION HANDLERS ---------- */
+  async function confirmAction() {
     if (!verifyPin()) return;
 
-    await addDoc(collection(db, "league", "matches", "list"), {
-      mwasGoals: Number(mwasGoals),
-      mashGoals: Number(mashGoals),
-      timestamp: new Date()
-    });
-
-    setMwasGoals(0);
-    setMashGoals(0);
-    setPin("");
-
-    await trimMatches();
-    await loadMatches();
-  }
-
-  /* ---------- DELETE MATCH ---------- */
-  async function deleteMatch(id) {
-    const confirmed = window.confirm("Delete this match?");
-    if (!confirmed) return;
-    if (!verifyPin()) return;
-
-    await deleteDoc(doc(db, "league", "matches", "list", id));
-    setPin("");
-    await loadMatches();
-  }
-
-  /* ---------- LIMIT TO 10 ---------- */
-  async function trimMatches() {
-    const q = query(
-      collection(db, "league", "matches", "list"),
-      orderBy("timestamp", "desc")
-    );
-    const snap = await getDocs(q);
-    const excess = snap.docs.slice(10);
-    for (const d of excess) {
-      await deleteDoc(d.ref);
+    if (modalAction === "add") {
+      await addDoc(collection(db, "league", "matches", "list"), {
+        mwasGoals: Number(mwasGoals),
+        mashGoals: Number(mashGoals),
+        timestamp: new Date()
+      });
+      setMwasGoals(0);
+      setMashGoals(0);
     }
+
+    if (modalAction === "delete" && targetMatchId) {
+      await deleteDoc(doc(db, "league", "matches", "list", targetMatchId));
+    }
+
+    if (modalAction === "reset") {
+      const snap = await getDocs(collection(db, "league", "matches", "list"));
+      for (const d of snap.docs) await deleteDoc(d.ref);
+    }
+
+    closeModal();
+    await loadMatches();
   }
 
   /* ---------- SORT TABLE ---------- */
@@ -151,7 +152,7 @@ export default function Home() {
       <h1>Mwas vs Mash League</h1>
 
       <div className="card">
-        <h2>Add Match (PIN Required)</h2>
+        <h2>Add Match</h2>
         <div className="score-row">
           <input type="number" value={mwasGoals} onChange={e => setMwasGoals(e.target.value)} />
           <span className="badge mwas">Mwas</span>
@@ -159,17 +160,7 @@ export default function Home() {
           <span className="badge mash">Mash</span>
           <input type="number" value={mashGoals} onChange={e => setMashGoals(e.target.value)} />
         </div>
-
-        <input
-          type="number"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          placeholder="4-digit PIN"
-          value={pin}
-          onChange={e => setPin(e.target.value.slice(0, 4))}
-        />
-
-        <button onClick={submitMatch}>Submit Match</button>
+        <button onClick={() => openModal("add")}>Submit Match</button>
       </div>
 
       <div className="card">
@@ -208,12 +199,15 @@ export default function Home() {
             </tbody>
           </table>
         </div>
+        <button className="danger" onClick={() => openModal("reset")}>
+          Reset Season
+        </button>
       </div>
 
       <div className="card">
-        <h2>Match History (Last 10)</h2>
+        <h2>Last 10 Matches</h2>
         <ul>
-          {matches.map(m => (
+          {recentMatches.map(m => (
             <li key={m.id}>
               <span className="badge mwas">Mwas</span> {m.mwasGoals}
               &nbsp;–&nbsp;
@@ -221,13 +215,33 @@ export default function Home() {
               <div className="timestamp">
                 {new Date(m.timestamp.seconds * 1000).toLocaleString()}
               </div>
-              <button className="danger small" onClick={() => deleteMatch(m.id)}>
+              <button className="danger small" onClick={() => openModal("delete", m.id)}>
                 Delete
               </button>
             </li>
           ))}
         </ul>
       </div>
+
+      {modalAction && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h3>Enter PIN</h3>
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              value={pinInput}
+              onChange={e => setPinInput(e.target.value)}
+            />
+            <div className="modal-actions">
+              <button onClick={confirmAction}>Confirm</button>
+              <button className="danger" onClick={closeModal}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
