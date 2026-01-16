@@ -3,87 +3,126 @@
 import { useEffect, useState } from "react";
 import { db } from "../lib/firebase";
 import {
-  doc,
-  getDoc,
-  setDoc,
   collection,
   addDoc,
   getDocs,
+  deleteDoc,
+  doc,
+  getDoc,
   orderBy,
   query,
-  deleteDoc,
   limit
 } from "firebase/firestore";
 
 const teams = ["Mwas", "Mash"];
 
-function emptyTable() {
-  return {
+function calculateTable(matches) {
+  const table = {
     Mwas: { played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, points: 0 },
     Mash: { played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, points: 0 }
   };
+
+  matches.forEach(m => {
+    table.Mwas.played++;
+    table.Mash.played++;
+
+    table.Mwas.gf += m.mwasGoals;
+    table.Mwas.ga += m.mashGoals;
+    table.Mash.gf += m.mashGoals;
+    table.Mash.ga += m.mwasGoals;
+
+    if (m.mwasGoals > m.mashGoals) {
+      table.Mwas.won++;
+      table.Mwas.points += 3;
+      table.Mash.lost++;
+    } else if (m.mwasGoals < m.mashGoals) {
+      table.Mash.won++;
+      table.Mash.points += 3;
+      table.Mwas.lost++;
+    } else {
+      table.Mwas.drawn++;
+      table.Mash.drawn++;
+      table.Mwas.points++;
+      table.Mash.points++;
+    }
+  });
+
+  return table;
 }
 
 export default function Home() {
-  const [table, setTable] = useState(emptyTable());
   const [matches, setMatches] = useState([]);
+  const [table, setTable] = useState(calculateTable([]));
   const [mwasGoals, setMwasGoals] = useState(0);
   const [mashGoals, setMashGoals] = useState(0);
+  const [pin, setPin] = useState("");
+  const [adminPin, setAdminPin] = useState("");
 
-  /* ---------------- LOAD DATA ---------------- */
+  /* ---------- LOAD DATA ---------- */
   useEffect(() => {
-    async function loadData() {
-      const tableSnap = await getDoc(doc(db, "league", "table"));
-      if (tableSnap.exists()) setTable(tableSnap.data());
-
-      const q = query(
-        collection(db, "league", "matches", "list"),
-        orderBy("timestamp", "desc"),
-        limit(10)
-      );
-      const snap = await getDocs(q);
-      setMatches(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }
-    loadData();
+    loadAdminPin();
+    loadMatches();
   }, []);
 
-  /* ---------------- SUBMIT MATCH ---------------- */
-  async function submitMatch() {
-    const updated = { ...table };
-
-    updated.Mwas.played++;
-    updated.Mash.played++;
-
-    updated.Mwas.gf += Number(mwasGoals);
-    updated.Mwas.ga += Number(mashGoals);
-    updated.Mash.gf += Number(mashGoals);
-    updated.Mash.ga += Number(mwasGoals);
-
-    if (mwasGoals > mashGoals) {
-      updated.Mwas.won++;
-      updated.Mwas.points += 3;
-      updated.Mash.lost++;
-    } else if (mwasGoals < mashGoals) {
-      updated.Mash.won++;
-      updated.Mash.points += 3;
-      updated.Mwas.lost++;
-    } else {
-      updated.Mwas.drawn++;
-      updated.Mash.drawn++;
-      updated.Mwas.points++;
-      updated.Mash.points++;
+  async function loadAdminPin() {
+    const snap = await getDoc(doc(db, "config", "admin"));
+    if (snap.exists()) {
+      setAdminPin(snap.data().pin);
     }
+  }
 
-    await setDoc(doc(db, "league", "table"), updated);
+  async function loadMatches() {
+    const q = query(
+      collection(db, "league", "matches", "list"),
+      orderBy("timestamp", "desc"),
+      limit(10)
+    );
+    const snap = await getDocs(q);
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    setMatches(data);
+    setTable(calculateTable(data));
+  }
 
-    // Add new match
+  /* ---------- PIN CHECK ---------- */
+  function verifyPin() {
+    if (pin !== adminPin) {
+      alert("Incorrect PIN");
+      return false;
+    }
+    return true;
+  }
+
+  /* ---------- ADD MATCH ---------- */
+  async function submitMatch() {
+    if (!verifyPin()) return;
+
     await addDoc(collection(db, "league", "matches", "list"), {
       mwasGoals: Number(mwasGoals),
       mashGoals: Number(mashGoals),
       timestamp: new Date()
     });
 
-    // Enforce max 10 matches
+    setMwasGoals(0);
+    setMashGoals(0);
+    setPin("");
+
+    await trimMatches();
+    await loadMatches();
+  }
+
+  /* ---------- DELETE MATCH ---------- */
+  async function deleteMatch(id) {
+    const confirmed = window.confirm("Delete this match?");
+    if (!confirmed) return;
+    if (!verifyPin()) return;
+
+    await deleteDoc(doc(db, "league", "matches", "list", id));
+    setPin("");
+    await loadMatches();
+  }
+
+  /* ---------- LIMIT TO 10 ---------- */
+  async function trimMatches() {
     const q = query(
       collection(db, "league", "matches", "list"),
       orderBy("timestamp", "desc")
@@ -93,53 +132,26 @@ export default function Home() {
     for (const d of excess) {
       await deleteDoc(d.ref);
     }
-
-    // Reload match list
-    const limited = snap.docs.slice(0, 10);
-    setMatches(limited.map(d => ({ id: d.id, ...d.data() })));
-
-    setTable(updated);
-    setMwasGoals(0);
-    setMashGoals(0);
   }
 
-  /* ---------------- RESET SEASON ---------------- */
-  async function resetSeason() {
-    const confirmed = window.confirm(
-      "This will reset the season and delete all matches. Continue?"
-    );
-    if (!confirmed) return;
-
-    await setDoc(doc(db, "league", "table"), emptyTable());
-
-    const snap = await getDocs(collection(db, "league", "matches", "list"));
-    for (const d of snap.docs) {
-      await deleteDoc(d.ref);
-    }
-
-    setTable(emptyTable());
-    setMatches([]);
-  }
-
-  /* ---------------- TABLE SORTING ---------------- */
-  const sortedTeams = teams
-    .map(team => ({
-      name: team,
-      ...table[team],
-      gd: table[team].gf - table[team].ga
+  /* ---------- SORT TABLE ---------- */
+  const sorted = teams
+    .map(t => ({
+      name: t,
+      ...table[t],
+      gd: table[t].gf - table[t].ga
     }))
-    .sort((a, b) => {
-      if (b.points !== a.points) return b.points - a.points;
-      return b.gd - a.gd;
-    });
+    .sort((a, b) =>
+      b.points !== a.points ? b.points - a.points : b.gd - a.gd
+    );
 
-  /* ---------------- UI ---------------- */
+  /* ---------- UI ---------- */
   return (
     <main className="container">
       <h1>Mwas vs Mash League</h1>
 
       <div className="card">
-        <h2>Enter Match</h2>
+        <h2>Add Match (PIN Required)</h2>
         <div className="score-row">
           <input type="number" value={mwasGoals} onChange={e => setMwasGoals(e.target.value)} />
           <span className="badge mwas">Mwas</span>
@@ -147,11 +159,20 @@ export default function Home() {
           <span className="badge mash">Mash</span>
           <input type="number" value={mashGoals} onChange={e => setMashGoals(e.target.value)} />
         </div>
-        <button className="animate" onClick={submitMatch}>Submit Match</button>
-        <button className="danger" onClick={resetSeason}>Reset Season</button>
+
+        <input
+          type="number"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          placeholder="4-digit PIN"
+          value={pin}
+          onChange={e => setPin(e.target.value.slice(0, 4))}
+        />
+
+        <button onClick={submitMatch}>Submit Match</button>
       </div>
 
-      <div className="card table-card">
+      <div className="card">
         <h2>League Table</h2>
         <div className="table-wrapper">
           <table>
@@ -170,22 +191,18 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {sortedTeams.map((team, index) => (
-                <tr key={team.name}>
-                  <td>{index + 1}</td>
-                  <td>
-                    <span className={`badge ${team.name.toLowerCase()}`}>
-                      {team.name}
-                    </span>
-                  </td>
-                  <td>{team.played}</td>
-                  <td>{team.won}</td>
-                  <td>{team.drawn}</td>
-                  <td>{team.lost}</td>
-                  <td>{team.gf}</td>
-                  <td>{team.ga}</td>
-                  <td>{team.gd}</td>
-                  <td>{team.points}</td>
+              {sorted.map((t, i) => (
+                <tr key={t.name}>
+                  <td>{i + 1}</td>
+                  <td><span className={`badge ${t.name.toLowerCase()}`}>{t.name}</span></td>
+                  <td>{t.played}</td>
+                  <td>{t.won}</td>
+                  <td>{t.drawn}</td>
+                  <td>{t.lost}</td>
+                  <td>{t.gf}</td>
+                  <td>{t.ga}</td>
+                  <td>{t.gd}</td>
+                  <td>{t.points}</td>
                 </tr>
               ))}
             </tbody>
@@ -194,7 +211,7 @@ export default function Home() {
       </div>
 
       <div className="card">
-        <h2>Last 10 Matches</h2>
+        <h2>Match History (Last 10)</h2>
         <ul>
           {matches.map(m => (
             <li key={m.id}>
@@ -204,6 +221,9 @@ export default function Home() {
               <div className="timestamp">
                 {new Date(m.timestamp.seconds * 1000).toLocaleString()}
               </div>
+              <button className="danger small" onClick={() => deleteMatch(m.id)}>
+                Delete
+              </button>
             </li>
           ))}
         </ul>
